@@ -26,8 +26,6 @@ class Rebalance:
         self.last_hop_channel_id = self.parse_channel_id(arguments.to)
         self.first_hop_channel = None
         self.last_hop_channel = None
-        self.min_local = arguments.min_local
-        self.min_remote = arguments.min_remote
 
     @staticmethod
     def parse_channel_id(id_string):
@@ -51,89 +49,36 @@ class Rebalance:
             )
         return rebalance_amount, self.lnd.get_ppm_to(channel.chan_id)
 
-    def get_scaled_min_local(self, channel):
-        local_available = get_local_available(channel)
-        remote_available = get_remote_available(channel)
-        if local_available + remote_available >= self.min_local + self.min_remote:
-            return self.min_local
-        return self.min_local / (self.min_local + self.min_remote) * (local_available + remote_available)
-
-    def get_scaled_min_remote(self, channel):
-        local_available = get_local_available(channel)
-        remote_available = get_remote_available(channel)
-        if local_available + remote_available >= self.min_local + self.min_remote:
-            return self.min_remote
-        return self.min_remote / (self.min_local + self.min_remote) * (local_available + remote_available)
-
-    def get_rebalance_amount(self, channel):
-        local_available = get_local_available(channel)
-        remote_available = get_remote_available(channel)
-        too_small = local_available + remote_available < self.min_local + self.min_remote
-        if too_small:
-            return int(self.get_scaled_min_local(channel) - local_available)
-        if local_available < self.min_local:
-            return self.min_local - local_available
-        if remote_available < self.min_remote:
-            return remote_available - self.min_remote
-        return 0
-
     def get_amount(self):
         if self.arguments.amount:
-            if self.arguments.reckless and self.arguments.amount > MAX_SATOSHIS_PER_TRANSACTION:
-                self.output.print_line(format_error("Trying to send wumbo transaction"))
-                return self.arguments.amount
-            else:
-                return min(self.arguments.amount, MAX_SATOSHIS_PER_TRANSACTION)
+            return min(self.arguments.amount, MAX_SATOSHIS_PER_TRANSACTION)
 
-        should_send = 0
-        can_send = 0
-        if self.first_hop_channel:
-            should_send = -self.get_rebalance_amount(self.first_hop_channel)
-            can_send = self.get_amount_can_send(self.first_hop_channel)
-
-            if can_send < 0:
-                from_alias = self.lnd.get_node_alias(self.first_hop_channel.remote_pubkey)
+        if self.last_hop_channel:
+            amount = get_rebalance_amount(self.last_hop_channel)
+            remote_surplus = get_remote_surplus(self.last_hop_channel)
+            if remote_surplus < 0:
                 print(
-                    f"Error: source channel {format_channel_id(self.first_hop_channel.chan_id)} to "
-                    f"{format_alias(from_alias)} needs to {chalk.green('receive')} funds to be within bounds,"
-                    f" you want it to {chalk.red('send')} funds. "
+                    f"Error: last hop needs to SEND {abs(remote_surplus):,} sat to be balanced, "
+                    f"you want it to RECEIVE funds. Specify amount manually if this was intended."
+                )
+                return 0
+        else:
+            amount = get_rebalance_amount(self.first_hop_channel)
+            remote_surplus = get_remote_surplus(self.first_hop_channel)
+            if remote_surplus > 0:
+                print(
+                    f"Error: first hop needs to RECEIVE {remote_surplus:,} sat to be balanced, you want it to SEND funds. "
                     "Specify amount manually if this was intended."
                 )
                 return 0
 
-        should_receive = 0
-        can_receive = 0
-        if self.last_hop_channel:
-            should_receive = self.get_rebalance_amount(self.last_hop_channel)
-            can_receive = self.get_amount_can_receive(self.last_hop_channel)
+        if self.last_hop_channel and self.first_hop_channel:
+            rebalance_amount_from_channel = get_rebalance_amount(self.first_hop_channel)
+            amount = min(amount, rebalance_amount_from_channel)
 
-            if can_receive < 0:
-                to_alias = self.lnd.get_node_alias(self.last_hop_channel.remote_pubkey)
-                print(
-                    f"Error: target channel {format_channel_id(self.last_hop_channel.chan_id)} to "
-                    f"{format_alias(to_alias)} needs to {chalk.green('send')} funds to be within bounds, "
-                    f"you want it to {chalk.red('receive')} funds."
-                    f" Specify amount manually if this was intended."
-                )
-                return 0
+        amount = min(amount, MAX_SATOSHIS_PER_TRANSACTION)
 
-        if self.first_hop_channel and self.last_hop_channel:
-            amount = max(min(can_receive, should_send), min(can_send, should_receive))
-        elif self.first_hop_channel:
-            amount = should_send
-        else:
-            amount = should_receive
-
-        amount = int(amount)
-        if amount >= 0:
-            return min(amount, MAX_SATOSHIS_PER_TRANSACTION)
-        return max(amount, -MAX_SATOSHIS_PER_TRANSACTION)
-
-    def get_amount_can_send(self, channel):
-        return get_local_available(channel) - self.get_scaled_min_local(channel)
-
-    def get_amount_can_receive(self, channel):
-        return get_remote_available(channel) - self.get_scaled_min_remote(channel)
+        return amount
 
     def get_channel_for_channel_id(self, channel_id):
         for channel in self.lnd.get_channels():
@@ -255,8 +200,6 @@ class Rebalance:
             fee_factor,
             fee_limit_sat,
             fee_ppm_limit,
-            self.min_local,
-            self.min_remote,
             self.output,
             self.arguments.reckless
         ).rebalance()
@@ -422,18 +365,6 @@ def get_argument_parser():
         help="(Default: 10,000) If the given or computed rebalance amount is below this limit, nothing is done.",
     )
     rebalance_group.add_argument(
-        "--min-local",
-        type=int,
-        default=1_000_000,
-        help="(Default: 1,000,000) Ensure that the channels have at least this amount as outbound liquidity."
-    )
-    rebalance_group.add_argument(
-        "--min-remote",
-        type=int,
-        default=1_000_000,
-        help="(Default: 1,000,000) Ensure that the channels have at least this amount as inbound liquidity."
-    )
-    rebalance_group.add_argument(
         "-e",
         "--exclude",
         type=str,
@@ -472,6 +403,12 @@ def get_argument_parser():
     )
     return parser
 
+
+def get_rebalance_amount(channel):
+    return abs(int(float(get_remote_surplus(channel)) / 2))
+
+def get_remote_surplus(channel):
+    return channel.remote_balance - channel.local_balance
 
 def get_local_available(channel):
     return max(0, channel.local_balance - channel.local_chan_reserve_sat)
@@ -512,3 +449,4 @@ success = main()
 if success:
     sys.exit(0)
 sys.exit(1)
+

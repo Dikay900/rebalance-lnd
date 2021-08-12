@@ -54,11 +54,13 @@ Do not forget to update the Python dependencies as described above.
 # Usage
 
 ### List of channels
-Run `rebalance.py -l` (or `rebalance.py -l -i`) to see a list of channels which can be rebalanced.
-This list only contains channels where you should increase the outbound liquidity (you can specify `--show-all` to see
-all channels).
+Run `rebalance.py -l` (or `rebalance.py -l -i`) to see a list of channels which
+can be rebalanced.
+This list only contains channels where less than 50% of the available funds are on
+the local side of the channel.
 
-You can also see the list of channels where the inbound liquidity should be increased by running `rebalance.py -l -o`.
+You can also see the list of channels where less than 50% of the available funds
+are on the remote side of the channel by running `rebalance.py -l -o`.
 
 As an example the following indicates a channel with around 17.7% of the funds
 on the local side:
@@ -73,13 +75,12 @@ Fee rates:        123ppm (own), 456ppm (peer)
 Capacity:         5,000,000
 Remote available: 4,110,320
 Local available:    883,364
-Rebalance amount:   116,636
+Amount for 50-50: 1,613,478
 [█████░░░░░░░░░░░░░░░░░░░░░░░]
 ```
 
-By sending 116,636 satoshis to yourself using this channel, an outbound liquidity of 1,000,000 satoshis can be achieved.
-This number is shown as "Rebalance amount" (where negative amounts indicate that you need to increase your inbound
-liquidity).
+By sending 1,613,478 satoshis to yourself using this channel, a ratio of 50% can be achieved.
+This number is shown as "Amount for 50-50".
 
 The last line shows a graphical representation of the channel. 
 The total width is determined by the channel's capacity, where your largest channel (maximum capacity) occupies the full
@@ -117,18 +118,14 @@ For this two main constraints are taken into consideration:
 
 After the rebalance transaction is finished, 
 
- - the destination channel (`22222222`) should have (up to) 1,000,000 satoshis outbound liquidity
- - the source channel (`11111111`) should have (at least) 1,000,000 satoshis outbound liquidity
+ - the destination channel (`22222222`) should have (up to) 50% outbound liquidity
+ - the source channel (`11111111`) should have (at least) 50% outbound liquidity
 
 If the source channel has enough surplus outbound liquidity, the script constructs a transaction that ensures
-1,000,000 satoshis of outbound liquidity in the destination channel.
+50% outbound liquidity in the destination channel.
 However, if the source channel does not have enough outbound liquidity, the amount is determined so that (after the
-rebalance transaction is performed) the source channel has 1,000,000 satoshis of outbound liquidity and the destination
-channel has more outbound liquidity than before (but not necessarily 1,000,000 satoshis).
-
-Note that for smaller channels these criteria cannot be met.
-If that is the case, a ratio of 50% is targeted instead: the destination channel receives up to 50% outbound
-liquidity, and for the sending channel at least 50% outbound liquidity are maintained.
+rebalance transaction is performed) the source channel has 50% outbound liquidity and the destination channel has more
+outbound liquidity than before (but not necessarily 50%).
 
 ### Only specifying one channel 
 
@@ -137,15 +134,13 @@ The script then considers all of your other channels as possible "partners", sti
 described above.
 
 As an example, if you run `rebalance.py --amount 100000 --to 22222222`, the script tries to find source channels
-that, after sending 100,000 satoshis (plus fees), still have at least 1,000,000 satoshis of outbound liquidity.
+that, after sending 100,000 satoshis (plus fees), have at least 50% outbound liquidity.
 In other words, the script does not send funds from already "empty" channels.
-
-Likewise, when only specifying `--from`, the script only considers target channels which still have at least 1,000,000
-satoshis of outbound liquidity after receiving the payment.
+Likewise, when only specifying `--from`, the script does not send funds to "full" channels.
 
 If you also let the script determine the amount, e.g. you run `rebalance.py --to 22222222`, the script first
-computes the amount that is necessary to reach 1,000,000 satoshis of outbound liquidity in channel `22222222`, 
-and then tries to find source channels for the computed amount.
+computes the amount that is necessary to reach 50% outbound liquidity in channel `22222222`, and then tries to find
+source channels for the computed amount.
 
 ### Safety Checks and Limitations
 
@@ -243,8 +238,7 @@ Please make sure to set realistic fee rates, which at best are already known to 
 usage: rebalance.py [-h] [--lnddir LNDDIR] [--grpc GRPC] [-l]
                     [--show-all | --show-only CHANNEL | -c] [-o | -i]
                     [-f CHANNEL] [-t CHANNEL] [-a AMOUNT | -p PERCENTAGE]
-                    [--min-amount MIN_AMOUNT] [--min-local MIN_LOCAL]
-                    [--min-remote MIN_REMOTE] [-e EXCLUDE] [--reckless]
+                    [--min-amount MIN_AMOUNT] [-e EXCLUDE] [--reckless]
                     [--fee-factor FEE_FACTOR | --fee-limit FEE_LIMIT | --fee-ppm-limit FEE_PPM_LIMIT]
 
 optional arguments:
@@ -261,10 +255,10 @@ list candidates:
   --show-only CHANNEL   only show information about the given channel
   -c, --compact         Shows a compact list of all channels, one per line
                         including ID, inbound/outbound liquidity, and alias
-  -o, --outgoing        lists channels with less than 1,500,00 satoshis
-                        inbound liquidity
-  -i, --incoming        (default) lists channels with less than 1,500,00
-                        satoshis outbound liquidity
+  -o, --outgoing        lists channels with less than 50% of the funds on the
+                        remote side
+  -i, --incoming        (default) lists channels with less than 50% of the
+                        funds on the local side
 
 rebalance:
   Rebalance a channel. You need to specify at least the 'from' channel (-f)
