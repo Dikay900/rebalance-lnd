@@ -273,6 +273,8 @@ class Logic:
             if self.reckless:
                 self.output.print_line(format_error("Considering route with high fees"))
                 return False
+            if missed_fee_msat > expected_income_msat:
+                routes.ignore_hop_on_route(route.hops[1], route)
             difference_msat = -rebalance_fee_msat - missed_fee_msat + expected_income_msat
             first_hop_alias = format_alias(self.lnd.get_node_alias(route.hops[0].pub_key))
             last_hop_alias = format_alias(self.lnd.get_node_alias(route.hops[-2].pub_key))
