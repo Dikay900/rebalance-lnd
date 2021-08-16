@@ -392,7 +392,7 @@ def get_argument_parser():
     )
     fee_group.add_argument(
         "--fee-limit",
-        type=int,
+        type=float,
         help="If set, only consider rebalance transactions that cost up to the given number of satoshis."
     )
     fee_group.add_argument(
